@@ -8,40 +8,86 @@
 //   4. find set of free variables
 //   5. find set of bound variables (plus where they're bound)
 
-sealed trait Term { // trait vs. abstract class?
+sealed trait Term { 
+// trait vs. abstract class?
 // why can't I define a method in here?
-//    def print(): String = {
-//        this match {
-//            case B() => ""
-//            case A(op, arg) => "a" + op + "b" + arg
-//            case F(a,b) => ""
-//            case S(x) => x
-//        }
-//    }
 }
 
+// here's what it could look like with ordinary classes: note the use of `val`
+//   class A(val op: String, val arg: String)
 case class A(op: Term, arg: Term) extends Term
 case class F(param: String, body: Term) extends Term
 case class S(name: String) extends Term
-// here's what it could look like with ordinary classes: note the use of `val`
-// class A(val op: String, val arg: String)
 
 val eg1 = F("z", A(S("xyz"), F("q", S("abc"))))
+val eg2 = F("a", F("b", F("a", A(S("c"), F("b", S("a"))))))
 
-object Print {
-    def print(term: Term): String = {
-        term match {
-            case A(a,b) => "(" + print(a) + " " + print(b) + ")"
-            case S(s) => s
-            case F(o,a) => "\\" + o + "." + print(a)
-        }
+def print(term: Term): String = {
+    term match {
+        case A(a,b) => "(" + print(a) + " " + print(b) + ")"
+        case S(s) => s
+        case F(o,a) => "\\" + o + "." + print(a)
     }
 }
 
 object Reducer {
-    def vars(term: Term) = println(Print.print(term))
-//        val q = Print.print(term)
-        //println(Print.print(term))
-//    }
+
+    def vars(term: Term): List[String] = {
+        term match {
+            case A(f,a) => vars(f) ++ vars(a)
+            case S(s)   => List(s)
+            case F(p,b) => List(p) ++ vars(b)
+        }
+    }
+    
+    def bound(term: Term): List[String] = {
+        term match {
+            case A(f,a) => bound(f) ++ bound(a)
+            case S(s)   => List()
+            case F(p,b) => List(p) ++ bound(b)
+        }
+    }
+
+    def used(term: Term): List[String] = {
+        term match {
+            case A(f,a) => used(f) ++ used(a)
+            case S(s)   => List(s)
+            case F(p,b) => List() ++ used(b)
+        }
+    }
+    /*
+    def lookup(var: String, vars: List[String])
+    
+    def scopes_help(term: Term, vars: List[String]) = {
+        term match {
+            case A(f,a) => 
+            case S(s)   => 
+            case F(p,b) => 
+        }
+    }
+
+    def scopes(term: Term): ??? = {
+        scopes_help(term, List())
+    }
+    */
+    def shadowing_help(term: Term, vars: List[String]): List[String] = {
+        term match {
+            case A(f,a) => shadowing_help(f, vars) ++ shadowing_help(a, vars)
+            case S(s)   => List()
+            case F(p,b) => List(if (vars.contains(p)) ("shadowing: " + p) else ("not shadowing: " + p)) ++ shadowing_help(b, p :: vars)
+        }
+    }
+    
+    def shadowing(term: Term) = {
+        shadowing_help(term, List())
+    }
+    
+    def all(term: Term) = {
+        println(print(term))
+        println("vars: " + vars(term))
+        println("bound: " + bound(term))
+        println("used: " + used(term))
+        println("shadowing: " + shadowing(term))
+    }
 }
 
