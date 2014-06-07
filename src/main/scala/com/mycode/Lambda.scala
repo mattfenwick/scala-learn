@@ -18,15 +18,24 @@ sealed trait Term {
 case class A(op: Term, arg: Term) extends Term
 case class F(param: String, body: Term) extends Term
 case class S(name: String) extends Term
+// (+ x y z) and \x y z -> z (x y)
+case class As(op: Term, args: List[Term]) extends Term
+case class Fs(params: List[String], body: Term) extends Term {
+    val ps = params.toSet
+    if ( params.size > ps.size ) throw new Exception("duplicate symbol in Fs constructor")
+}
 
 val eg1 = F("z", A(S("xyz"), F("q", S("abc"))))
 val eg2 = F("a", F("b", F("a", A(S("c"), F("b", S("a"))))))
+val eg3 = Fs(List("a", "b", "c"), A(eg1, eg2))
 
 def print(term: Term): String = {
     term match {
-        case A(a,b) => "(" + print(a) + " " + print(b) + ")"
-        case S(s) => s
-        case F(o,a) => "\\" + o + "." + print(a)
+        case A(a,b)   => "(" + print(a) + " " + print(b) + ")"
+        case S(s)     => s
+        case F(o,a)   => "\\" + o + "." + print(a)
+        case As(o,as) => "(" + print(o) + as.map(print).mkString(" ") + ")"
+        case Fs(ps,b) => "\\" + ps.mkString(" ") + " " + print(b)
     }
 }
 
@@ -70,11 +79,11 @@ object Reducer {
         scopes_help(term, List())
     }
     */
-    def shadowing_help(term: Term, vars: List[String]): List[String] = {
+    def shadowing_help(term: Term, vars: List[String]): List[(String, List[String])] = {
         term match {
             case A(f,a) => shadowing_help(f, vars) ++ shadowing_help(a, vars)
-            case S(s)   => List()
-            case F(p,b) => List(if (vars.contains(p)) ("shadowing: " + p) else ("not shadowing: " + p)) ++ shadowing_help(b, p :: vars)
+            case S(s)   => List(("symbol: " + s, vars))
+            case F(p,b) => List((if (vars.contains(p)) ("shadowing: " + p) else ("not shadowing: " + p), vars)) ++ shadowing_help(b, p :: vars)
         }
     }
     
