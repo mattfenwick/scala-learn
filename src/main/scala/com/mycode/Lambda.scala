@@ -124,3 +124,35 @@ object Reducer {
     }
 }
 
+
+def f_bound(b_pair: (Int, Map[String, String]), name: String) = {
+  val ix = b_pair._1
+  val map = b_pair._2
+  val keyval = (name, "" + ix)
+  (ix + 1, map + keyval)
+}
+
+class Scope(val parent: Option[Scope], val vars: Map[String, String]) {
+
+    def nested(new_vars: List[String], b: Int): (Scope, Int) = {
+        val base = (b, Map()): (Int, Map[String, String])
+        val reduced = new_vars.foldLeft(base)(f_bound)
+        val new_b = reduced._1
+        val new_translations = reduced._2
+        (new Scope(Some(this), new_translations), new_b)
+    }
+    
+    override def toString(): String = {
+        val par = parent match {
+            case None    => "()"
+            case Some(p) => p.toString()
+        }
+        val m = Map("type"   -> "Scope", 
+                    "parent" -> par,
+                    "vars"   -> vars.toString)
+        m.toString
+    }
+}
+
+val root = new Scope(None, Map() : Map[String, String])
+
