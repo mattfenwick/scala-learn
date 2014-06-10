@@ -27,15 +27,16 @@ case class Fs(params: List[String], body: Term) extends Term {
 
 val eg1 = F("z", A(S("xyz"), F("q", S("abc"))))
 val eg2 = F("a", F("b", F("a", A(S("c"), F("b", S("a"))))))
-val eg3 = Fs(List("a", "b", "c"), A(eg1, eg2))
+val eg3 = Fs(List("a", "b", "c"), As(S("f"), List(eg1, eg2, S("z"))))
+val eg4 = A(S("f"), F("f", S("f"))) // both a bound and a free "f"
 
 def print(term: Term): String = {
     term match {
         case A(a,b)   => "(" + print(a) + " " + print(b) + ")"
         case S(s)     => s
-        case F(o,a)   => "\\" + o + "." + print(a)
+        case F(o,a)   => "\\" + o + ". " + print(a)
         case As(o,as) => "(" + print(o) + as.map(print).mkString(" ") + ")"
-        case Fs(ps,b) => "\\" + ps.mkString(" ") + " " + print(b)
+        case Fs(ps,b) => "\\ " + ps.mkString(" ") + " " + print(b)
     }
 }
 
@@ -43,25 +44,41 @@ object Reducer {
 
     def vars(term: Term): List[String] = {
         term match {
-            case A(f,a) => vars(f) ++ vars(a)
-            case S(s)   => List(s)
-            case F(p,b) => List(p) ++ vars(b)
+            case A(f,a)   => vars(f) ++ vars(a)
+            case S(s)     => List(s)
+            case F(p,b)   => List(p) ++ vars(b)
+            case As(o,as) => vars(o) ++ as.flatMap(vars)
+            case Fs(ps,b) => ps      ++ vars(b)
         }
     }
     
     def bound(term: Term): List[String] = {
         term match {
-            case A(f,a) => bound(f) ++ bound(a)
-            case S(s)   => List()
-            case F(p,b) => List(p) ++ bound(b)
+            case A(f,a)   => bound(f) ++ bound(a)
+            case S(s)     => List()
+            case F(p,b)   => List(p)  ++ bound(b)
+            case As(o,as) => bound(o) ++ as.flatMap(bound)
+            case Fs(ps,b) => ps       ++ bound(b)
+        }
+    }
+    
+    def free(term: Term): Set[String] = {
+        term match {
+            case A(f,a)   => free(f) ++ free(a)
+            case S(s)     => Set(s)
+            case F(p,b)   => free(b) - p
+            case As(o,as) => free(o) ++ as.flatMap(free)
+            case Fs(ps,b) => free(b) -- ps.toSet
         }
     }
 
     def used(term: Term): List[String] = {
         term match {
-            case A(f,a) => used(f) ++ used(a)
-            case S(s)   => List(s)
-            case F(p,b) => List() ++ used(b)
+            case A(f,a)   => used(f) ++ used(a)
+            case S(s)     => List(s)
+            case F(p,b)   => List()  ++ used(b)
+            case As(o,as) => used(o) ++ as.flatMap(used)
+            case Fs(ps,b) => used(b)
         }
     }
     /*
@@ -84,6 +101,8 @@ object Reducer {
             case A(f,a) => shadowing_help(f, vars) ++ shadowing_help(a, vars)
             case S(s)   => List(("symbol: " + s, vars))
             case F(p,b) => List((if (vars.contains(p)) ("shadowing: " + p) else ("not shadowing: " + p), vars)) ++ shadowing_help(b, p :: vars)
+//            case As(o,as) => 
+//            case Fs(ps,b) =>
         }
     }
     
@@ -91,10 +110,15 @@ object Reducer {
         shadowing_help(term, List())
     }
     
+//    def substitute(term: Term, var: String, new_val: Term) {
+//    
+//    }
+    
     def all(term: Term) = {
         println(print(term))
         println("vars: " + vars(term))
         println("bound: " + bound(term))
+        println("free: " + free(term))
         println("used: " + used(term))
         println("shadowing: " + shadowing(term))
     }
