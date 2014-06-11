@@ -30,10 +30,14 @@ val eg5 = F_("x", A(S("f"), List(S("x"), S("y"))))
 val eg6 = F_("x", S("y"))
 val eg7 = F_("x", S("x"))
 val eg8 = F_("x", F_("y", S("y")))
+val eg9 = A_(S("g"), F_("g", S("g")))
+val eg10 = A_(S("g"), S("g"))
+
+
 
 def print(term: Term): String = {
     term match {
-        case S(s)     => s
+        case S(s)    => s
         case A(o,as) => "(" + print(o) + " " + as.map(print).mkString(" ") + ")"
         case F(ps,b) => "\\" + ps.mkString(" ") + ". " + print(b)
     }
@@ -41,7 +45,7 @@ def print(term: Term): String = {
 
 def vars(term: Term): List[String] = {
     term match {
-        case S(s)     => List(s)
+        case S(s)    => List(s)
         case A(o,as) => vars(o) ++ as.flatMap(vars)
         case F(ps,b) => ps      ++ vars(b)
     }
@@ -49,7 +53,7 @@ def vars(term: Term): List[String] = {
 
 def bound(term: Term): List[String] = {
     term match {
-        case S(s)     => List()
+        case S(s)    => List()
         case A(o,as) => bound(o) ++ as.flatMap(bound)
         case F(ps,b) => ps       ++ bound(b)
     }
@@ -57,7 +61,7 @@ def bound(term: Term): List[String] = {
 
 def free(term: Term): Set[String] = {
     term match {
-        case S(s)     => Set(s)
+        case S(s)    => Set(s)
         case A(o,as) => free(o) ++ as.flatMap(free)
         case F(ps,b) => free(b) -- ps.toSet
     }
@@ -65,7 +69,7 @@ def free(term: Term): Set[String] = {
 
 def used(term: Term): List[String] = {
     term match {
-        case S(s)     => List(s)
+        case S(s)    => List(s)
         case A(o,as) => used(o) ++ as.flatMap(used)
         case F(ps,b) => used(b)
     }
@@ -81,7 +85,7 @@ def f_list(ps: List[String], vars: List[String]) = {
 
 def shadowing_help(term: Term, vars: List[String]): List[(String, List[String])] = {
     term match {
-        case S(s)   => List(("symbol: " + s, vars))
+        case S(s)    => List(("symbol: " + s, vars))
         case A(o,as) => (o :: as).flatMap((t) => shadowing_help(t, vars))
         case F(ps,b) => f_list(ps, vars) ++ shadowing_help(b, ps ++ vars)
     }
@@ -93,10 +97,28 @@ def shadowing(term: Term) = {
 }
 
 def f_bound(b_pair: (Int, Map[String, String]), name: String) = {
-  val ix = b_pair._1
-  val map = b_pair._2
-  val keyval = (name, "b" + ix)
-  (ix + 1, map + keyval)
+    val ix = b_pair._1
+    val map = b_pair._2
+    val keyval = (name, "b" + ix)
+    (ix + 1, map + keyval)
+}
+
+class Free(val vars: Map[String, String]) {
+
+    def lookup(name: String): (Free, String) = {
+        vars.get(name) match {
+            case None   => {
+                val new_name = "f" + (vars.size + 1)
+                val new_vars = vars + ((name, new_name))
+                (new Free(new_vars), new_name)
+            }
+            case Some(s) => (this, s)
+        }
+    }
+    
+    override def toString() : String = {
+        Map("type" -> "Free", "vars" -> vars).toString
+    }
 }
 
 class Scope(val parent: Option[Scope], val vars: Map[String, String]) {
@@ -129,33 +151,40 @@ class Scope(val parent: Option[Scope], val vars: Map[String, String]) {
     }
 }
 
-val root = new Scope(None, Map() : Map[String, String])
-
-def resolve(term: Term, scope: Scope, b: Int): (Term, Int) = {
+def resolve(term: Term, scope: Scope, b: Int, free: Free): (Term, Int, Free) = {
     term match {
-        case S(s)   => scope.lookup(s) match {
-            case None   => (S("f" + s), b) // TODO free variables -- consistent names
-            case Some(n) => (S(n), b)
-        }
-        case A(o,as) => {
-            val (o_n, b_2) = resolve(o, scope, b)
-            val base = (List(), b_2): (List[Term], Int)
-            def f_um(curr: (List[Term], Int), term: Term): (List[Term], Int) = {
-                val (the_as, b_n) = curr
-                val (term_n, b_out) = resolve(term, scope, b_n)
-                (term_n :: the_as, b_out)
+        case S(s)       => scope.lookup(s) match {
+            // s isn't bound -- therefore it's free
+            case None    => { 
+                // s is either a new free variable, or an already seen one
+                val (new_free, name) = free.lookup(s)
+                (S(name), b, new_free)
             }
-            val (as_n, b_final) = as.foldLeft(base)(f_um)
-            (A(o_n, as_n.reverse), b_final)
+            // s is bound: find its translation
+            case Some(n) => (S(n), b, free)
+        }
+        case A(o,as)    => {
+            val (o_n, b_2, f_2) = resolve(o, scope, b, free)
+            val base = (List(), b_2, f_2): (List[Term], Int, Free)
+            def f_um(curr: (List[Term], Int, Free), term: Term): (List[Term], Int, Free) = {
+                val (the_as, b_n, free_n) = curr
+                val (term_n, b_out, free_out) = resolve(term, scope, b_n, free_n)
+                (term_n :: the_as, b_out, free_out)
+            }
+            val (as_n, b_final, free_final) = as.foldLeft(base)(f_um)
+            (A(o_n, as_n.reverse), b_final, free_final)
         }
         case F(ps,body) => {
             val (scp, b_2) = scope.nested(ps, b)
-            val (new_body, b_3) = resolve(body, scp, b_2)
-            (F(ps.map((p) => scp.lookup(p).get), new_body), b_3)
+            val (new_body, b_3, free_2) = resolve(body, scp, b_2, free)
+            (F(ps.map((p) => scp.lookup(p).get), new_body), b_3, free_2)
         }
     }
 }
 /**/
+
+val root = new Scope(None, Map() : Map[String, String])
+val frees = new Free(Map()) : Free
 
 def all_traversals(term: Term) = {
     println(print(term))
@@ -164,13 +193,13 @@ def all_traversals(term: Term) = {
     println("free: " + free(term))
     println("used: " + used(term))
     println("shadowing: " + shadowing(term))
-    val (new_term, b) = resolve(term, root, 1)
+    val (new_term, b, new_frees) = resolve(term, root, 1, frees)
     println("alpha-substituted: " + print(new_term))
     println
 }
 
 def all() = {
-    val egs = List(eg1, eg2, eg3, eg4, eg5, eg6, eg7, eg8)
+    val egs = List(eg1, eg2, eg3, eg4, eg5, eg6, eg7, eg8, eg9, eg10)
     egs.map(all_traversals)
 }
 
