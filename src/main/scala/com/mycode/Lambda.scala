@@ -18,7 +18,6 @@ sealed trait Term {
 case class A(op: Term, arg: Term) extends Term
 case class F(param: String, body: Term) extends Term
 case class S(name: String) extends Term
-// (+ x y z) and \x y z -> z (x y)
 case class As(op: Term, args: List[Term]) extends Term
 case class Fs(params: List[String], body: Term) extends Term {
     val ps = params.toSet
@@ -29,14 +28,18 @@ val eg1 = F("z", A(S("xyz"), F("q", S("abc"))))
 val eg2 = F("a", F("b", F("a", A(S("c"), F("b", S("a"))))))
 val eg3 = Fs(List("a", "b", "c"), As(S("f"), List(eg1, eg2, S("z"))))
 val eg4 = A(S("f"), F("f", S("f"))) // both a bound and a free "f"
+val eg5 = F("x", As(S("f"), List(S("x"), S("y"))))
+val eg6 = F("x", S("y"))
+val eg7 = F("x", S("x"))
+val eg8 = F("x", F("y", S("y")))
 
 def print(term: Term): String = {
     term match {
         case A(a,b)   => "(" + print(a) + " " + print(b) + ")"
         case S(s)     => s
         case F(o,a)   => "\\" + o + ". " + print(a)
-        case As(o,as) => "(" + print(o) + as.map(print).mkString(" ") + ")"
-        case Fs(ps,b) => "\\ " + ps.mkString(" ") + " " + print(b)
+        case As(o,as) => "(" + print(o) + " " + as.map(print).mkString(" ") + ")"
+        case Fs(ps,b) => "\\" + ps.mkString(" ") + ". " + print(b)
     }
 }
 
@@ -81,38 +84,28 @@ object Reducer {
             case Fs(ps,b) => used(b)
         }
     }
-    /*
-    def lookup(var: String, vars: List[String])
-    
-    def scopes_help(term: Term, vars: List[String]) = {
-        term match {
-            case A(f,a) => 
-            case S(s)   => 
-            case F(p,b) => 
-        }
-    }
 
-    def scopes(term: Term): ??? = {
-        scopes_help(term, List())
+    def f_list(ps: List[String], vars: List[String]) = {
+      ps.map((p) => ((if (vars.contains(p)) 
+                        "shadowing: " + p
+                      else 
+                        "not shadowing: " + p),
+                     vars))
     }
-    */
+    
     def shadowing_help(term: Term, vars: List[String]): List[(String, List[String])] = {
         term match {
             case A(f,a) => shadowing_help(f, vars) ++ shadowing_help(a, vars)
             case S(s)   => List(("symbol: " + s, vars))
-            case F(p,b) => List((if (vars.contains(p)) ("shadowing: " + p) else ("not shadowing: " + p), vars)) ++ shadowing_help(b, p :: vars)
-//            case As(o,as) => 
-//            case Fs(ps,b) =>
+            case F(p,b) => f_list(List(p), vars) ++ shadowing_help(b, p :: vars)
+            case As(o,as) => (o :: as).flatMap((t) => shadowing_help(t, vars))
+            case Fs(ps,b) => List()
         }
     }
     
     def shadowing(term: Term) = {
         shadowing_help(term, List())
     }
-    
-//    def substitute(term: Term, var: String, new_val: Term) {
-//    
-//    }
     
     def all(term: Term) = {
         println(print(term))
@@ -128,7 +121,7 @@ object Reducer {
 def f_bound(b_pair: (Int, Map[String, String]), name: String) = {
   val ix = b_pair._1
   val map = b_pair._2
-  val keyval = (name, "" + ix)
+  val keyval = (name, "b" + ix)
   (ix + 1, map + keyval)
 }
 
@@ -136,9 +129,7 @@ class Scope(val parent: Option[Scope], val vars: Map[String, String]) {
 
     def nested(new_vars: List[String], b: Int): (Scope, Int) = {
         val base = (b, Map()): (Int, Map[String, String])
-        val reduced = new_vars.foldLeft(base)(f_bound)
-        val new_b = reduced._1
-        val new_translations = reduced._2
+        val (new_b, new_translations) = new_vars.foldLeft(base)(f_bound)
         (new Scope(Some(this), new_translations), new_b)
     }
     
@@ -152,7 +143,53 @@ class Scope(val parent: Option[Scope], val vars: Map[String, String]) {
                     "vars"   -> vars.toString)
         m.toString
     }
+    
+    def lookup(name: String): Option[String] = {
+        if (vars.contains(name))
+            vars.get(name)
+        else 
+            parent match {
+                case None    => None
+                case Some(p) => p.lookup(name)
+            }
+    }
 }
 
 val root = new Scope(None, Map() : Map[String, String])
+
+def resolve(term: Term, scope: Scope, b: Int): (Term, Int) = {
+    term match {
+        case S(s)   => scope.lookup(s) match {
+            case None   => (S("f" + s), b) // TODO free variables -- consistent names
+            case Some(n) => (S(n), b)
+        }
+        case A(f,a)    => {
+            val (f_n, b_2) = resolve(f, scope, b)
+            val (a_n, b_3) = resolve(a, scope, b_2)
+            (A(f_n, a_n), b_3)
+        }
+        case F(p,body) => {
+            val (scp, b_2) = scope.nested(List(p), b)
+            val (new_body, b_3) = resolve(body, scp, b_2)
+            (F(scp.lookup(p).get, new_body), b_3)
+        }
+        case As(o,as) => {
+            val (o_n, b_2) = resolve(o, scope, b)
+            val base = (List(), b_2): (List[Term], Int)
+            def f_um(curr: (List[Term], Int), term: Term): (List[Term], Int) = {
+                val (the_as, b_n) = curr
+                val (term_n, b_out) = resolve(term, scope, b_n)
+                (term_n :: the_as, b_out)
+            }
+            val (as_n, b_final) = as.foldLeft(base)(f_um)
+            (As(o_n, as_n.reverse), b_final)
+        }
+        case Fs(ps,body) => {
+            val (scp, b_2) = scope.nested(ps, b)
+            val (new_body, b_3) = resolve(body, scp, b_2)
+            (Fs(ps.map((p) => scp.lookup(p).get), new_body), b_3)
+        }
+    }
+}
+/**/
 
