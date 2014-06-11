@@ -14,60 +14,60 @@ sealed trait Term {
 }
 
 case class S(name: String) extends Term
-case class As(op: Term, args: List[Term]) extends Term
-case class Fs(params: List[String], body: Term) extends Term {
+case class A(op: Term, args: List[Term]) extends Term
+case class F(params: List[String], body: Term) extends Term {
     val ps = params.toSet
-    if ( params.size > ps.size ) throw new Exception("duplicate symbol in Fs constructor")
+    if ( params.size > ps.size ) throw new Exception("duplicate symbol in F constructor")
 }
-def F(p: String, term: Term): Fs = { Fs(List(p), term) }
-def A(op: Term, arg: Term) : As = { As(op, List(arg)) }
+def F_(p: String, term: Term): F = { F(List(p), term) }
+def A_(op: Term, arg: Term) : A = { A(op, List(arg)) }
 
-val eg1 = F("z", A(S("xyz"), F("q", S("abc"))))
-val eg2 = F("a", F("b", F("a", A(S("c"), F("b", S("a"))))))
-val eg3 = Fs(List("a", "b", "c"), As(S("f"), List(eg1, eg2, S("z"))))
-val eg4 = A(S("f"), F("f", S("f"))) // both a bound and a free "f"
-val eg5 = F("x", As(S("f"), List(S("x"), S("y"))))
-val eg6 = F("x", S("y"))
-val eg7 = F("x", S("x"))
-val eg8 = F("x", F("y", S("y")))
+val eg1 = F_("z", A_(S("xyz"), F_("q", S("abc"))))
+val eg2 = F_("a", F_("b", F_("a", A_(S("c"), F_("b", S("a"))))))
+val eg3 = F(List("a", "b", "c"), A(S("f"), List(eg1, eg2, S("z"))))
+val eg4 = A_(S("f"), F_("f", S("f"))) // both a bound and a free "f"
+val eg5 = F_("x", A(S("f"), List(S("x"), S("y"))))
+val eg6 = F_("x", S("y"))
+val eg7 = F_("x", S("x"))
+val eg8 = F_("x", F_("y", S("y")))
 
 def print(term: Term): String = {
     term match {
         case S(s)     => s
-        case As(o,as) => "(" + print(o) + " " + as.map(print).mkString(" ") + ")"
-        case Fs(ps,b) => "\\" + ps.mkString(" ") + ". " + print(b)
+        case A(o,as) => "(" + print(o) + " " + as.map(print).mkString(" ") + ")"
+        case F(ps,b) => "\\" + ps.mkString(" ") + ". " + print(b)
     }
 }
 
 def vars(term: Term): List[String] = {
     term match {
         case S(s)     => List(s)
-        case As(o,as) => vars(o) ++ as.flatMap(vars)
-        case Fs(ps,b) => ps      ++ vars(b)
+        case A(o,as) => vars(o) ++ as.flatMap(vars)
+        case F(ps,b) => ps      ++ vars(b)
     }
 }
 
 def bound(term: Term): List[String] = {
     term match {
         case S(s)     => List()
-        case As(o,as) => bound(o) ++ as.flatMap(bound)
-        case Fs(ps,b) => ps       ++ bound(b)
+        case A(o,as) => bound(o) ++ as.flatMap(bound)
+        case F(ps,b) => ps       ++ bound(b)
     }
 }
 
 def free(term: Term): Set[String] = {
     term match {
         case S(s)     => Set(s)
-        case As(o,as) => free(o) ++ as.flatMap(free)
-        case Fs(ps,b) => free(b) -- ps.toSet
+        case A(o,as) => free(o) ++ as.flatMap(free)
+        case F(ps,b) => free(b) -- ps.toSet
     }
 }
 
 def used(term: Term): List[String] = {
     term match {
         case S(s)     => List(s)
-        case As(o,as) => used(o) ++ as.flatMap(used)
-        case Fs(ps,b) => used(b)
+        case A(o,as) => used(o) ++ as.flatMap(used)
+        case F(ps,b) => used(b)
     }
 }
 
@@ -82,8 +82,8 @@ def f_list(ps: List[String], vars: List[String]) = {
 def shadowing_help(term: Term, vars: List[String]): List[(String, List[String])] = {
     term match {
         case S(s)   => List(("symbol: " + s, vars))
-        case As(o,as) => (o :: as).flatMap((t) => shadowing_help(t, vars))
-        case Fs(ps,b) => f_list(ps, vars) ++ shadowing_help(b, ps ++ vars)
+        case A(o,as) => (o :: as).flatMap((t) => shadowing_help(t, vars))
+        case F(ps,b) => f_list(ps, vars) ++ shadowing_help(b, ps ++ vars)
     }
 }
 
@@ -137,7 +137,7 @@ def resolve(term: Term, scope: Scope, b: Int): (Term, Int) = {
             case None   => (S("f" + s), b) // TODO free variables -- consistent names
             case Some(n) => (S(n), b)
         }
-        case As(o,as) => {
+        case A(o,as) => {
             val (o_n, b_2) = resolve(o, scope, b)
             val base = (List(), b_2): (List[Term], Int)
             def f_um(curr: (List[Term], Int), term: Term): (List[Term], Int) = {
@@ -146,12 +146,12 @@ def resolve(term: Term, scope: Scope, b: Int): (Term, Int) = {
                 (term_n :: the_as, b_out)
             }
             val (as_n, b_final) = as.foldLeft(base)(f_um)
-            (As(o_n, as_n.reverse), b_final)
+            (A(o_n, as_n.reverse), b_final)
         }
-        case Fs(ps,body) => {
+        case F(ps,body) => {
             val (scp, b_2) = scope.nested(ps, b)
             val (new_body, b_3) = resolve(body, scp, b_2)
-            (Fs(ps.map((p) => scp.lookup(p).get), new_body), b_3)
+            (F(ps.map((p) => scp.lookup(p).get), new_body), b_3)
         }
     }
 }
