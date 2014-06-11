@@ -13,16 +13,14 @@ sealed trait Term {
 // why can't I define a method in here?
 }
 
-// here's what it could look like with ordinary classes: note the use of `val`
-//   class A(val op: String, val arg: String)
-case class A(op: Term, arg: Term) extends Term
-case class F(param: String, body: Term) extends Term
 case class S(name: String) extends Term
 case class As(op: Term, args: List[Term]) extends Term
 case class Fs(params: List[String], body: Term) extends Term {
     val ps = params.toSet
     if ( params.size > ps.size ) throw new Exception("duplicate symbol in Fs constructor")
 }
+def F(p: String, term: Term): Fs = { Fs(List(p), term) }
+def A(op: Term, arg: Term) : As = { As(op, List(arg)) }
 
 val eg1 = F("z", A(S("xyz"), F("q", S("abc"))))
 val eg2 = F("a", F("b", F("a", A(S("c"), F("b", S("a"))))))
@@ -35,88 +33,64 @@ val eg8 = F("x", F("y", S("y")))
 
 def print(term: Term): String = {
     term match {
-        case A(a,b)   => "(" + print(a) + " " + print(b) + ")"
         case S(s)     => s
-        case F(o,a)   => "\\" + o + ". " + print(a)
         case As(o,as) => "(" + print(o) + " " + as.map(print).mkString(" ") + ")"
         case Fs(ps,b) => "\\" + ps.mkString(" ") + ". " + print(b)
     }
 }
 
-object Reducer {
-
-    def vars(term: Term): List[String] = {
-        term match {
-            case A(f,a)   => vars(f) ++ vars(a)
-            case S(s)     => List(s)
-            case F(p,b)   => List(p) ++ vars(b)
-            case As(o,as) => vars(o) ++ as.flatMap(vars)
-            case Fs(ps,b) => ps      ++ vars(b)
-        }
-    }
-    
-    def bound(term: Term): List[String] = {
-        term match {
-            case A(f,a)   => bound(f) ++ bound(a)
-            case S(s)     => List()
-            case F(p,b)   => List(p)  ++ bound(b)
-            case As(o,as) => bound(o) ++ as.flatMap(bound)
-            case Fs(ps,b) => ps       ++ bound(b)
-        }
-    }
-    
-    def free(term: Term): Set[String] = {
-        term match {
-            case A(f,a)   => free(f) ++ free(a)
-            case S(s)     => Set(s)
-            case F(p,b)   => free(b) - p
-            case As(o,as) => free(o) ++ as.flatMap(free)
-            case Fs(ps,b) => free(b) -- ps.toSet
-        }
-    }
-
-    def used(term: Term): List[String] = {
-        term match {
-            case A(f,a)   => used(f) ++ used(a)
-            case S(s)     => List(s)
-            case F(p,b)   => List()  ++ used(b)
-            case As(o,as) => used(o) ++ as.flatMap(used)
-            case Fs(ps,b) => used(b)
-        }
-    }
-
-    def f_list(ps: List[String], vars: List[String]) = {
-      ps.map((p) => ((if (vars.contains(p)) 
-                        "shadowing: " + p
-                      else 
-                        "not shadowing: " + p),
-                     vars))
-    }
-    
-    def shadowing_help(term: Term, vars: List[String]): List[(String, List[String])] = {
-        term match {
-            case A(f,a) => shadowing_help(f, vars) ++ shadowing_help(a, vars)
-            case S(s)   => List(("symbol: " + s, vars))
-            case F(p,b) => f_list(List(p), vars) ++ shadowing_help(b, p :: vars)
-            case As(o,as) => (o :: as).flatMap((t) => shadowing_help(t, vars))
-            case Fs(ps,b) => List()
-        }
-    }
-    
-    def shadowing(term: Term) = {
-        shadowing_help(term, List())
-    }
-    
-    def all(term: Term) = {
-        println(print(term))
-        println("vars: " + vars(term))
-        println("bound: " + bound(term))
-        println("free: " + free(term))
-        println("used: " + used(term))
-        println("shadowing: " + shadowing(term))
+def vars(term: Term): List[String] = {
+    term match {
+        case S(s)     => List(s)
+        case As(o,as) => vars(o) ++ as.flatMap(vars)
+        case Fs(ps,b) => ps      ++ vars(b)
     }
 }
 
+def bound(term: Term): List[String] = {
+    term match {
+        case S(s)     => List()
+        case As(o,as) => bound(o) ++ as.flatMap(bound)
+        case Fs(ps,b) => ps       ++ bound(b)
+    }
+}
+
+def free(term: Term): Set[String] = {
+    term match {
+        case S(s)     => Set(s)
+        case As(o,as) => free(o) ++ as.flatMap(free)
+        case Fs(ps,b) => free(b) -- ps.toSet
+    }
+}
+
+def used(term: Term): List[String] = {
+    term match {
+        case S(s)     => List(s)
+        case As(o,as) => used(o) ++ as.flatMap(used)
+        case Fs(ps,b) => used(b)
+    }
+}
+
+def f_list(ps: List[String], vars: List[String]) = {
+  ps.map((p) => ((if (vars.contains(p)) 
+                    "shadowing: " + p
+                  else 
+                    "not shadowing: " + p),
+                 vars))
+}
+
+def shadowing_help(term: Term, vars: List[String]): List[(String, List[String])] = {
+    term match {
+        case S(s)   => List(("symbol: " + s, vars))
+        case As(o,as) => (o :: as).flatMap((t) => shadowing_help(t, vars))
+        case Fs(ps,b) => f_list(ps, vars) ++ shadowing_help(b, ps ++ vars)
+    }
+}
+
+def shadowing(term: Term) = {
+    // TODO this needs to realize that it's shadowing free variables ... maybe ?
+    shadowing_help(term, List())
+}
 
 def f_bound(b_pair: (Int, Map[String, String]), name: String) = {
   val ix = b_pair._1
@@ -163,16 +137,6 @@ def resolve(term: Term, scope: Scope, b: Int): (Term, Int) = {
             case None   => (S("f" + s), b) // TODO free variables -- consistent names
             case Some(n) => (S(n), b)
         }
-        case A(f,a)    => {
-            val (f_n, b_2) = resolve(f, scope, b)
-            val (a_n, b_3) = resolve(a, scope, b_2)
-            (A(f_n, a_n), b_3)
-        }
-        case F(p,body) => {
-            val (scp, b_2) = scope.nested(List(p), b)
-            val (new_body, b_3) = resolve(body, scp, b_2)
-            (F(scp.lookup(p).get, new_body), b_3)
-        }
         case As(o,as) => {
             val (o_n, b_2) = resolve(o, scope, b)
             val base = (List(), b_2): (List[Term], Int)
@@ -192,4 +156,21 @@ def resolve(term: Term, scope: Scope, b: Int): (Term, Int) = {
     }
 }
 /**/
+
+def all_traversals(term: Term) = {
+    println(print(term))
+    println("vars: " + vars(term))
+    println("bound: " + bound(term))
+    println("free: " + free(term))
+    println("used: " + used(term))
+    println("shadowing: " + shadowing(term))
+    val (new_term, b) = resolve(term, root, 1)
+    println("alpha-substituted: " + print(new_term))
+    println
+}
+
+def all() = {
+    val egs = List(eg1, eg2, eg3, eg4, eg5, eg6, eg7, eg8)
+    egs.map(all_traversals)
+}
 
