@@ -32,6 +32,7 @@ val eg7 = F_("x", S("x"))
 val eg8 = F_("x", F_("y", S("y")))
 val eg9 = A_(S("g"), F_("g", S("g")))
 val eg10 = A_(S("g"), S("g"))
+val eg11 = A(S("f"), List(F_("f", S("f")), F_("f", S("f"))))
 
 
 
@@ -39,7 +40,7 @@ def print(term: Term): String = {
     term match {
         case S(s)    => s
         case A(o,as) => "(" + print(o) + " " + as.map(print).mkString(" ") + ")"
-        case F(ps,b) => "\\" + ps.mkString(" ") + ". " + print(b)
+        case F(ps,b) => "(\\" + ps.mkString(" ") + ". " + print(b) + ")"
     }
 }
 
@@ -97,8 +98,7 @@ def shadowing(term: Term) = {
 }
 
 def f_bound(b_pair: (Int, Map[String, String]), name: String) = {
-    val ix = b_pair._1
-    val map = b_pair._2
+    val (ix, map) = b_pair
     val keyval = (name, "b" + ix)
     (ix + 1, map + keyval)
 }
@@ -186,6 +186,24 @@ def resolve(term: Term, scope: Scope, b: Int, free: Free): (Term, Int, Free) = {
 val root = new Scope(None, Map() : Map[String, String])
 val frees = new Free(Map()) : Free
 
+def sub_help(term: Term, name: String, new_term: Term): Term = {
+    println("sub help: " + term + " " + name + " " + new_term)
+    term match {
+        case S(s) => if (s == name) new_term else term
+        case F(ps,b) => if (ps.contains(name)) term else F(ps, sub_help(b, name, new_term))
+        case A(o,as) => A(sub_help(o, name, new_term),
+                          as.map((a) => sub_help(a, name, new_term)))
+    }
+}
+
+def substitute(term: Term, name: String, new_term: Term): Term = {
+    val (res_term, b, new_frees) = resolve(term, root, 1, frees)
+    new_frees.vars.get(name) match {
+        case None           => res_term // TODO undo the renames
+        case Some(new_name) => sub_help(res_term, new_name, new_term)
+    }
+}
+
 def all_traversals(term: Term) = {
     println(print(term))
     println("vars: " + vars(term))
@@ -194,12 +212,13 @@ def all_traversals(term: Term) = {
     println("used: " + used(term))
     println("shadowing: " + shadowing(term))
     val (new_term, b, new_frees) = resolve(term, root, 1, frees)
+    println("frees: " + new_frees)
     println("alpha-substituted: " + print(new_term))
     println
 }
 
 def all() = {
-    val egs = List(eg1, eg2, eg3, eg4, eg5, eg6, eg7, eg8, eg9, eg10)
+    val egs = List(eg1, eg2, eg3, eg4, eg5, eg6, eg7, eg8, eg9, eg10, eg11)
     egs.map(all_traversals)
 }
 
